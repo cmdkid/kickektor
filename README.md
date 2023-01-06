@@ -8,3 +8,7 @@ get mono audio in
 process sound signal snapshot and get triggers
 switch relay triggers, if conditions happen
 
+## IDE
+dev stand: macbook air M1, so
+I use VSCode + PlatformIO
+

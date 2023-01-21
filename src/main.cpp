@@ -1,84 +1,131 @@
-/* FFT_TEST4
- Ray Burnette 20130810 function clean-up & 1284 port (328 verified)
- Modified by varind in 2013: this code is public domain, enjoy!
- http://www.variableindustries.com/audio-spectrum-analyzer/
- 328P = Binary sketch size: 5,708 bytes (of a 32,256 byte maximum)
- */
 #include <Arduino.h>
+#include <TM1637.h>
 #include "fix_fft.h"  // fix_fft.ccp & fix_fft.h in same directory as sketch
 
-#define LCHAN 3
+#define PIN_AUX_IN 3  //digital audio in
+#define PIN_DEBUG 6 
+#define PIN_SETUP 7 
+#define PIN_RELAY1 2 
+#define PIN_GND 13 
 
-const int Yres = 8;
-const int gain = 3;
-float peaks[64];
-char im[64], data[64];
-char data_avgs[64];
-int debugLoop;
+// relay1 config
+const int rel0_gate_ch = 1;
+const int rel0_gate_val = 12;
+const int rel0_delay = 50;
+const int rel0_gate_valx3 = rel0_gate_val * 3;
 
+// relay board config
+const int rel_count = 1;
 
-int freeRam () {
-  extern int __heap_start, *__brkval; 
-  int v; 
-  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
-}
+// fft processing vars
+bool debug = false, setup_screen = false;
+char im[64], ttf_data[64];
+int float_window_width = 3;
+int last_fl_idx = -1, last_idx = 0; //float window idx'es - 1
+float last_val[10][3]; // float window vals
+bool is_trig_rel[rel_count];
 
-void Two16_LCD(){
-  for (int x = 1; x < 16; x++) {  // init 0 to show lowest band overloaded with hum
-    if (data_avgs[x] > peaks[x]) peaks[x] = data_avgs[x];
+TM1637 tm(10, 9); //init display (CLK, DIO) digital pins
 
-    if (peaks[x] == 0) {
-      Serial.print(" .   ");  // less LCD artifacts than " "
-    }
-    else {
-      Serial.print(peaks[x]);
-      Serial.print(" ");
-    }
-  }
-  Serial.println("");
-}
-
-void decay(int decayrate){
-  int DecayTest = 1;
-  // reduce the values of the last peaks by 1 
-  if (DecayTest == decayrate){
-    for (int x = 0; x < 32; x++) {
-      peaks[x] = peaks[x] - 1;  // subtract 1 from each column peaks
-      DecayTest = 0;
-    }
-  }
-
-  DecayTest++;
+void tm_show_config() {
+  tm.display(rel0_gate_val);
 }
 
 void setup() {
-  Serial.begin(9600); // hardware serial
-  Serial.print("Debug ON");
-  Serial.println("");
+  pinMode(PIN_RELAY1, OUTPUT);
+  analogWrite(PIN_GND, true);
+
+  // init relays
+  for (int i = 0; i < rel_count; i++) {
+    is_trig_rel[i] = false;
+  }
+  
+  if (digitalRead(PIN_DEBUG) == 0) {
+    debug = true;
+    Serial.begin(9600);
+    Serial.println("Debug ON");
+  }
+
+  if (digitalRead(PIN_SETUP) == 0) {
+    setup_screen = true;
+    tm.begin();
+    if (true == debug) {
+      Serial.println("Setup ON");
+    }
+  }
+}
+
+int get_last_idx() {
+  if (last_fl_idx >= float_window_width) {
+    last_fl_idx = -1;
+  }
+  return ++last_fl_idx;
+}
+
+void append_to_float_window(int channel_id, char val) {
+  for (int i = float_window_width-1; i > 0; i--) {
+    last_val[channel_id][i] = last_val[channel_id][i-1];
+  }
+  last_val[channel_id][0] = val;
+}
+
+bool is_triggered(int channel_id, int gate_val) {
+  long sum = 0L;
+  for (int i = 0; i < float_window_width; i++) {
+    sum += last_val[channel_id][i];
+  }
+
+  if (true == debug) {
+    if (rel0_gate_valx3 < sum) {
+      Serial.print(sum/float_window_width);
+    } else {
+      Serial.print(0);
+    }
+    Serial.print(" ");
+  }
+
+  if ((((float) sum) / float_window_width) >= gate_val) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+void trig_relay(int relay_id, int delay_time, int channel_id) {
+  if (is_trig_rel[relay_id] == false) {
+    digitalWrite(PIN_RELAY1, true);
+    is_trig_rel[relay_id] = true;
+    for (int i = 0; i < float_window_width; i++) {
+      last_val[channel_id][i] = 0;
+    }
+    delay(delay_time);
+    digitalWrite(PIN_RELAY1, false);
+  }
 }
 
 void loop() {
+  if (true == setup_screen) {
+    tm_show_config();
+  }
+  // get eq snapshot
   for (int i = 0; i < 64; i++) {
-    data[i]  = ((analogRead(LCHAN) / 4 ) - 128);  // chose how to interpret the data from analog in  
+    ttf_data[i] = ((analogRead(PIN_AUX_IN) / 4 ) - 128); // normalize analog in
     im[i]  = 0;   // imaginary component  
   }
+  fix_fft(ttf_data, im, 6, 0);   // Send normalized analog values through fft
 
-  fix_fft(data, im, 6, 0);   // Send Left channel normalized analog values through fft
-
-  // At this stage, we have two arrays of [0-31] frequency bins deep [32-63] duplicate
+  // get last index in floating window
+  last_idx = get_last_idx();
 
   // calculate the absolute values of bins in the array - only want positive values
-  for (int i = 0; i < 16; i++) {
-    data[i] = sqrt(data[i]  *  data[i] +  im[i] *  im[i]);
-
-    // COPY the Right low-band (0-15) into the Left high-band (16-31) for display ease
-    data_avgs[i] = data[i];
-
-    // Remap values to physical display constraints... that is, 8 display custom character indexes + "_"
-    //data_avgs[i] = constrain(data_avgs[i], 0, 9 - gain);     //data samples * range (0-9) = 9
-    //data_avgs[i] = map(data_avgs[i], 0, 9 - gain, 0, Yres);  // remap averaged values
+  for (int i = 0; i < 10; i++) {
+    append_to_float_window(i, (float)(sqrt(ttf_data[i]  *  ttf_data[i] +  im[i] *  im[i])));
   }
 
-  Two16_LCD();
-  decay(1);
+  // check value limits
+  if (is_triggered(rel0_gate_ch, rel0_gate_val)) {
+    trig_relay(rel0_gate_ch, rel0_delay, rel0_gate_ch);
+  } else {
+    is_trig_rel[0] = false;
+  }
 }

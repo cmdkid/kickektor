@@ -6,13 +6,15 @@
 #define PIN_DEBUG 6 
 #define PIN_SETUP 7 
 #define PIN_RELAY1 2 
-#define PIN_GND 13 
+#define PIN_GATE_VAL_POT 1 
 
 // relay1 config
-const int rel0_gate_ch = 1;
-const int rel0_gate_val = 12;
-const int rel0_delay = 50;
-const int rel0_gate_valx3 = rel0_gate_val * 3;
+const int rel0_gate_ch = 1; //20
+int rel0_gate_val = 12;
+const int rel0_delay = 100;
+const int rel0_delay_after = 50;
+int rel0_gate_valx3 = rel0_gate_val * 3;
+int tmp_int;
 
 // relay board config
 const int rel_count = 1;
@@ -27,13 +29,19 @@ bool is_trig_rel[rel_count];
 
 TM1637 tm(10, 9); //init display (CLK, DIO) digital pins
 
-void tm_show_config() {
-  tm.display(rel0_gate_val);
+void tm_update_config() {
+  tmp_int = analogRead(PIN_GATE_VAL_POT) / 16;
+  if(tmp_int != rel0_gate_val) {
+    rel0_gate_val = tmp_int;
+    rel0_gate_valx3 = 1;
+    //rel0_gate_valx3 = rel0_gate_val * 3;
+    //Serial.println("rel0_gate_val=" + (String)rel0_gate_val);
+    tm.display(rel0_gate_val);
+  }
 }
 
 void setup() {
   pinMode(PIN_RELAY1, OUTPUT);
-  analogWrite(PIN_GND, true);
 
   // init relays
   for (int i = 0; i < rel_count; i++) {
@@ -91,7 +99,7 @@ bool is_triggered(int channel_id, int gate_val) {
   }
 }
 
-void trig_relay(int relay_id, int delay_time, int channel_id) {
+void trig_relay(int relay_id, int delay_time, int rel0_delay_after, int channel_id) {
   if (is_trig_rel[relay_id] == false) {
     digitalWrite(PIN_RELAY1, true);
     is_trig_rel[relay_id] = true;
@@ -100,12 +108,13 @@ void trig_relay(int relay_id, int delay_time, int channel_id) {
     }
     delay(delay_time);
     digitalWrite(PIN_RELAY1, false);
+    delay(rel0_delay_after);
   }
 }
 
 void loop() {
   if (true == setup_screen) {
-    tm_show_config();
+    tm_update_config();
   }
   // get eq snapshot
   for (int i = 0; i < 64; i++) {
@@ -124,7 +133,7 @@ void loop() {
 
   // check value limits
   if (is_triggered(rel0_gate_ch, rel0_gate_val)) {
-    trig_relay(rel0_gate_ch, rel0_delay, rel0_gate_ch);
+    trig_relay(rel0_gate_ch, rel0_delay, rel0_delay_after, rel0_gate_ch);
   } else {
     is_trig_rel[0] = false;
   }

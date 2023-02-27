@@ -13,7 +13,7 @@ const int rel0_gate_ch = 1; //20
 int rel0_gate_val = 12;
 const int rel0_delay = 100;
 const int rel0_delay_after = 50;
-int rel0_gate_valx3 = rel0_gate_val * 3;
+int rel0_gate_valx3 = 1; //rel0_gate_val * 3;
 int tmp_int;
 
 // relay board config
@@ -33,7 +33,6 @@ void tm_update_config() {
   tmp_int = analogRead(PIN_GATE_VAL_POT) / 16;
   if(tmp_int != rel0_gate_val) {
     rel0_gate_val = tmp_int;
-    rel0_gate_valx3 = 1;
     //rel0_gate_valx3 = rel0_gate_val * 3;
     //Serial.println("rel0_gate_val=" + (String)rel0_gate_val);
     tm.display(rel0_gate_val);
